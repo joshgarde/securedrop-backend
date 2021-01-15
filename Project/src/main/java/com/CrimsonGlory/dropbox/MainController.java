@@ -1,5 +1,6 @@
 package com.CrimsonGlory.dropbox;
 
+import com.CrimsonGlory.dropbox.Database.FileInfo;
 import com.CrimsonGlory.dropbox.Database.FileRepository;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
 import com.amazonaws.services.dynamodbv2.datamodeling.DynamoDBMapper;
@@ -27,7 +28,9 @@ public class MainController {
 
     @RequestMapping(value = "/uploadFile", method = RequestMethod.POST, consumes = {"multipart/form-data"})
     @ResponseBody
-    public ResponseEntity<?> uploadFile(@RequestParam("file") MultipartFile file, @RequestParam("metadata") MultipartFile metadata, @RequestParam("authtext") MultipartFile authtext){
-        return null;
+    public String uploadFile(@RequestParam("file") MultipartFile file, @RequestParam("metadata") MultipartFile metadata, @RequestParam("authtext") MultipartFile authtext){
+        FileInfo info = new FileInfo(metadata, authtext);
+        repository.save(info);
+        return info.getId();
     }
 }
