@@ -38,7 +38,7 @@ public class MainController {
     public String uploadFile(@RequestParam("file") MultipartFile file, @RequestParam("metadata") MultipartFile metadata, @RequestParam("authtext") MultipartFile authtext){
         FileInfo info = new FileInfo(file, metadata, authtext);
         repository.save(info);
-        uploadToS3(info)
+        uploadToS3(info);
         return info.getId();
     }
 
