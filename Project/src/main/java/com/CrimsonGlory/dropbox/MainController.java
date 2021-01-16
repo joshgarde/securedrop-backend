@@ -36,26 +36,31 @@ public class MainController {
     @RequestMapping(value = "/uploadFile", method = RequestMethod.POST, consumes = {"multipart/form-data"})
     @ResponseBody
     public String uploadFile(@RequestParam("file") MultipartFile file, @RequestParam("metadata") MultipartFile metadata, @RequestParam("authtext") MultipartFile authtext){
-        FileInfo info = new FileInfo(metadata, authtext);
+        FileInfo info = new FileInfo(file, metadata, authtext);
         repository.save(info);
+        uploadToS3(info)
         return info.getId();
     }
 
-    public String uploadToS3(MultipartFile file){
+    public String uploadToS3(FileInfo info){
         Region region = Region.US_WEST_1;
         try(S3Client s3 = S3Client.builder()
                 .region(region)
                 .build()){
             PutObjectRequest request = PutObjectRequest.builder()
                     .bucket(awsBucket)
-                    .key(String.valueOf(file))
+                    .key(info.getId())
                     .build();
-            PutObjectResponse response = s3.putObject(request, RequestBody.fromBytes(file.getBytes()));
+            PutObjectResponse response = s3.putObject(request, RequestBody.fromBytes(info.getFile().getBytes()));
             return response.eTag();
 
         } catch (IOException | S3Exception e) {
             System.out.println(e.getMessage());
         }
         return "Error uploading file.";
+    }
+
+    public String download(){
+        return null;
     }
 }
