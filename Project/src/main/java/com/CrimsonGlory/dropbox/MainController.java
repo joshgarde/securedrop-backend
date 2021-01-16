@@ -2,9 +2,16 @@ package com.CrimsonGlory.dropbox;
 
 import com.CrimsonGlory.dropbox.Database.FileInfo;
 import com.CrimsonGlory.dropbox.Database.FileRepository;
+import com.amazonaws.auth.AWSCredentials;
+import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
+import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
 import com.amazonaws.services.dynamodbv2.datamodeling.DynamoDBMapper;
+import com.amazonaws.util.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Bean;
+import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -16,11 +23,38 @@ import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.IOException;
 
+
 @RestController
+@Component
 public class MainController {
 
     private DynamoDBMapper dynamoDBMapper;
     private String awsBucket = "securedrop-ncali";
+
+    @Value("${amazon.dynamodb.endpoint}")
+    private String amazonDynamoDBEndpoint;
+
+    @Value("${amazon.aws.accesskey}")
+    private String amazonAWSAccessKey;
+
+    @Value("${amazon.aws.secretkey}")
+    private String amazonAWSSecretKey;
+
+    @Bean
+    public AmazonDynamoDB amazonDynamoDB(){
+        AmazonDynamoDB amazonDynamoDB = new AmazonDynamoDBClient(amazonAWSCredentials());
+
+        if(!StringUtils.isNullOrEmpty(amazonDynamoDBEndpoint))
+            amazonDynamoDB.setEndpoint(amazonDynamoDBEndpoint);
+
+        return amazonDynamoDB;
+    }
+
+    @Bean
+    public AWSCredentials amazonAWSCredentials(){
+        return new BasicAWSCredentials(amazonAWSAccessKey, amazonAWSSecretKey);
+    }
+
 
     @Autowired
     private AmazonDynamoDB amazonDynamoDB;
