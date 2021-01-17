@@ -24,9 +24,12 @@ import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3ClientBuilder;
 import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
 import com.amazonaws.util.StringUtils;
+import net.minidev.json.JSONObject;
+import org.apache.commons.codec.binary.Base64;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
@@ -37,7 +40,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
-import java.io.IOException;
+import java.io.*;
 import java.net.URL;
 import java.util.Date;
 import java.util.Dictionary;
@@ -124,13 +127,18 @@ public class MainController {
         return "Error uploading file.";
     }
 
-    @RequestMapping(value = "/downloadMetaData", method = RequestMethod.POST)
+    @RequestMapping(value = "/downloadMetaData", method = RequestMethod.POST, produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
     @ResponseBody
-    public Object download(@RequestParam("id") String id){
+    public byte[] download(@RequestParam("id") String id){
         GetItemSpec spec = new GetItemSpec().withPrimaryKey("id", id);
         try{
             Item outcome = table.getItem(spec);
-            return outcome.get("metadata");
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            ObjectOutputStream oos = new ObjectOutputStream(bos);
+            oos.writeObject(outcome.get("metadata"));
+            oos.flush();
+            byte[] data = bos.toByteArray();
+            return data;
         } catch(Exception e) {
             System.err.println("Unable to retrieve metadata.");
         }
