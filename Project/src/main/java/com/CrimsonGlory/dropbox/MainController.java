@@ -1,93 +1,67 @@
 package com.CrimsonGlory.dropbox;
 
 import com.CrimsonGlory.dropbox.Database.FileInfo;
-import com.CrimsonGlory.dropbox.Database.FileRepository;
-import com.amazonaws.AmazonServiceException;
-import com.amazonaws.HttpMethod;
-import com.amazonaws.auth.AWSCredentials;
-import com.amazonaws.auth.BasicAWSCredentials;
-import com.amazonaws.auth.profile.ProfileCredentialsProvider;
-import com.amazonaws.client.builder.AwsClientBuilder;
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDB;
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClient;
-import com.amazonaws.services.dynamodbv2.AmazonDynamoDBClientBuilder;
-import com.amazonaws.services.dynamodbv2.datamodeling.DynamoDBMapper;
-import com.amazonaws.services.dynamodbv2.document.DynamoDB;
-import com.amazonaws.services.dynamodbv2.document.Item;
-import com.amazonaws.services.dynamodbv2.document.PutItemOutcome;
-import com.amazonaws.services.dynamodbv2.document.Table;
-import com.amazonaws.services.dynamodbv2.document.spec.GetItemSpec;
-import com.amazonaws.services.dynamodbv2.model.AttributeValue;
-import com.amazonaws.services.dynamodbv2.model.GetItemRequest;
-import com.amazonaws.services.dynamodbv2.xspec.M;
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import com.amazonaws.services.s3.model.GeneratePresignedUrlRequest;
-import com.amazonaws.util.StringUtils;
-import net.minidev.json.JSONObject;
-import org.apache.commons.codec.binary.Base64;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.IOException;
+import java.util.Base64;
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.context.annotation.Bean;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.AwsCredentials;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.regions.Region;
+import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
+import software.amazon.awssdk.services.dynamodb.model.GetItemRequest;
+import software.amazon.awssdk.services.dynamodb.model.PutItemRequest;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
-import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 import software.amazon.awssdk.services.s3.model.S3Exception;
-
-import java.io.*;
-import java.net.URL;
-import java.util.Date;
-import java.util.Dictionary;
-import java.util.HashMap;
-import java.util.Map;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 
 
 @RestController
 @Component
 public class MainController {
+    private final static String BUCKET_NAME = "securedrop-ncali";
+    private final static String TABLE_NAME = "FileInfo";
 
-    private DynamoDBMapper dynamoDBMapper;
-    private String awsBucket = "securedrop-ncali";
-
-    @Value("${amazon.dynamodb.endpoint}")
-    private String amazonDynamoDBEndpoint;
-
-    @Value("${amazon.aws.accesskey}")
-    private String amazonAWSAccessKey;
-
-    @Value("${amazon.aws.secretkey}")
-    private String amazonAWSSecretKey;
-
-    @Bean
-    public AmazonDynamoDB amazonDynamoDB(){
-        AmazonDynamoDB amazonDynamoDB = new AmazonDynamoDBClient(amazonAWSCredentials());
-
-        if(!StringUtils.isNullOrEmpty(amazonDynamoDBEndpoint))
-            amazonDynamoDB.setEndpoint(amazonDynamoDBEndpoint);
-
-        return amazonDynamoDB;
-    }
-
-    @Bean
-    public AWSCredentials amazonAWSCredentials(){
-        return new BasicAWSCredentials(amazonAWSAccessKey, amazonAWSSecretKey);
-    }
-
+    private final AwsCredentialsProvider awsCredentialsProvider;
+    private final DynamoDbClient ddClient;
+    private final S3Client s3Client;
+    private final S3Presigner s3Presigner;
 
     @Autowired
-    private AmazonDynamoDB amazonDynamoDB;
+    private ObjectMapper mapper;
 
-    private AmazonDynamoDB client = AmazonDynamoDBClientBuilder.standard()
-            .withEndpointConfiguration(new AwsClientBuilder.EndpointConfiguration("http://localhost:8080", "us-west-1"))
+    @Autowired
+    public MainController(@Value("${amazon.aws.accesskey}") String accessKey, @Value("${amazon.aws.secretkey}") String secretKey) {
+        AwsCredentials awsCredentials = AwsBasicCredentials.create(accessKey, secretKey);
+        awsCredentialsProvider = StaticCredentialsProvider.create(awsCredentials);
+
+        ddClient = DynamoDbClient.builder()
+            .region(Region.US_WEST_1)
+            .credentialsProvider(awsCredentialsProvider)
             .build();
-    private DynamoDB dynamoDB = new DynamoDB(client);
-    private Table table = dynamoDB.getTable("CGTable");
+
+        s3Client = S3Client.builder()
+            .region(Region.US_WEST_1)
+            .credentialsProvider(awsCredentialsProvider)
+            .build();
+
+        s3Presigner = S3Presigner.builder()
+            .region(Region.US_WEST_1)
+            .credentialsProvider(awsCredentialsProvider)
+            .build();
+    }
 
 
     @RequestMapping("/")
@@ -95,57 +69,76 @@ public class MainController {
         return "Greetings from Spring Boot!";
     }
 
-    @RequestMapping(value = "/uploadFile", method = RequestMethod.POST, consumes = {"multipart/form-data"})
+    @RequestMapping(value = "/upload", method = RequestMethod.POST, consumes = {"multipart/form-data"})
+    @CrossOrigin(origins = "*")
     @ResponseBody
-    public String uploadFile(@RequestParam("file") MultipartFile file, @RequestParam("metadata") MultipartFile metadata, @RequestParam("authtext") MultipartFile authtext){
-        FileInfo info = new FileInfo(file, metadata, authtext);
-        Map<String, Object> attributes = new HashMap<>();
-        attributes.put("id", info.getId());
-        attributes.put("file", info.getFile());
-        attributes.put("metadata", info.getMetadata());
-        attributes.put("authtext", info.getAuthtext());
-        PutItemOutcome outcome = table.putItem(new Item().withPrimaryKey("id", info.getId()).withMap("info", attributes));
-        //uploadToS3(info);
-        return info.getId();
+    public ObjectNode uploadFile(@RequestParam("file") MultipartFile file, @RequestParam("metadata") MultipartFile metadata, @RequestParam("authtext") MultipartFile authtext){
+        ObjectNode response = mapper.createObjectNode();
+
+        try {
+            FileInfo info = new FileInfo(file, metadata, authtext);
+            shoveIntoDb(info);
+            uploadToS3(info);
+
+            response.put("success", true);
+            response.put("message", "");
+            response.put("id", info.getId());
+        } catch (IOException | S3Exception e) {
+            response.put("success", false);
+            response.put("message", "Unknown exception occured. Contact support.");
+        }
+
+        return response;
     }
 
-    public String uploadToS3(FileInfo info){
-        Region region = Region.US_WEST_1;
-        try(S3Client s3 = S3Client.builder()
-                .region(region)
-                .build()){
-            PutObjectRequest request = PutObjectRequest.builder()
-                    .bucket(awsBucket)
+    private void shoveIntoDb(FileInfo info) {
+        PutItemRequest request = PutItemRequest.builder()
+                .item(info.getAttributeMap())
+                .tableName(TABLE_NAME)
+                .build();
+
+        ddClient.putItem(request);
+    }
+
+    private void uploadToS3(FileInfo info) {
+        PutObjectRequest request = PutObjectRequest.builder()
+                    .bucket(BUCKET_NAME)
                     .key(info.getId())
                     .build();
-            PutObjectResponse response = s3.putObject(request, RequestBody.fromBytes(info.getFile().getBytes()));
-            return response.eTag();
-
-        } catch (IOException | S3Exception e) {
-            System.out.println(e.getMessage());
-        }
-        return "Error uploading file.";
+        s3Client.putObject(request, RequestBody.fromByteBuffer(info.getFile()));
     }
 
-    @RequestMapping(value = "/downloadMetaData", method = RequestMethod.POST, produces = MediaType.APPLICATION_OCTET_STREAM_VALUE)
+    @RequestMapping(value = "/metadata/{id}", method = RequestMethod.POST)
     @ResponseBody
-    public byte[] download(@RequestParam("id") String id){
-        GetItemSpec spec = new GetItemSpec().withPrimaryKey("id", id);
-        try{
-            Item outcome = table.getItem(spec);
-            ByteArrayOutputStream bos = new ByteArrayOutputStream();
-            ObjectOutputStream oos = new ObjectOutputStream(bos);
-            oos.writeObject(outcome.get("metadata"));
-            oos.flush();
-            byte[] data = bos.toByteArray();
-            return data;
-        } catch(Exception e) {
-            System.err.println("Unable to retrieve metadata.");
+    public ObjectNode download(@PathVariable("id") String id){
+        Map<String, AttributeValue> attributeMap = new HashMap<>();
+        attributeMap.put("id", AttributeValue.builder().s(id).build());
+
+        GetItemRequest request = GetItemRequest.builder()
+                .tableName(TABLE_NAME)
+                .attributesToGet("metadata")
+                .key(attributeMap)
+                .build();
+
+        Map<String, AttributeValue> result = ddClient.getItem(request).item();
+
+        ObjectNode response = mapper.createObjectNode();
+        if (result == null) {
+            response.put("success", false);
+            response.put("message", "ID not found");
+        } else {
+            byte[] metadata = result.get("metadata").b().asByteArray();
+            String base64Meta = Base64.getEncoder().encodeToString(metadata);
+
+            response.put("success", true);
+            response.put("message", "");
+            response.put("metadata", base64Meta);
         }
-        return null;
+
+        return response;
     }
 
-    @RequestMapping(value = "/downloadS3Link", method = RequestMethod.POST)
+    /*@RequestMapping(value = "/downloadS3Link", method = RequestMethod.POST)
     public URL downloadLink(@RequestParam("id") String id, @RequestParam("authtext") String authtext){
         GetItemSpec spec = new GetItemSpec().withPrimaryKey("id", id);
         URL url = null;
@@ -177,5 +170,5 @@ public class MainController {
             System.err.println("Unable to find file.");
         }
         return null;
-    }
+    }*/
 }

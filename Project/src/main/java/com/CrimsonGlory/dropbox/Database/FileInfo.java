@@ -1,45 +1,51 @@
 package com.CrimsonGlory.dropbox.Database;
 
-import com.amazonaws.services.dynamodbv2.datamodeling.DynamoDBAttribute;
-import com.amazonaws.services.dynamodbv2.datamodeling.DynamoDBHashKey;
-import com.amazonaws.services.dynamodbv2.datamodeling.DynamoDBTable;
-import com.amazonaws.services.dynamodbv2.model.PutItemRequest;
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.HashMap;
+import java.util.Map;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
+import software.amazon.awssdk.core.SdkBytes;
+import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
 
-@DynamoDBTable(tableName = "FileInfo")
 public class FileInfo {
     private String id;
-    private MultipartFile file;
-    private MultipartFile metadata;
-    private MultipartFile authtext;
+    private ByteBuffer file;
+    private ByteBuffer metadata;
+    private ByteBuffer authtext;
+    Map<String, AttributeValue> attributes = new HashMap<>();
 
-    public FileInfo(MultipartFile file, MultipartFile metadata, MultipartFile authtext){
+    public FileInfo(MultipartFile file, MultipartFile metadata, MultipartFile authtext) throws IOException {
         id = UUID.randomUUID().toString();
-        this.file = file;
-        this.metadata = metadata;
-        this.authtext = authtext;
+        this.file = ByteBuffer.wrap(file.getBytes());
+        this.metadata = ByteBuffer.wrap(metadata.getBytes());
+        this.authtext = ByteBuffer.wrap(authtext.getBytes());
+        
+        // Screw AWS type conversions.
+        attributes.put("id", AttributeValue.builder().s(id).build());
+        attributes.put("metadata", AttributeValue.builder().b(SdkBytes.fromByteBuffer(this.metadata)).build());
+        attributes.put("authtext", AttributeValue.builder().b(SdkBytes.fromByteBuffer(this.authtext)).build());
     }
 
-    @DynamoDBHashKey
     public String getId(){
         return id;
     }
 
-    @DynamoDBAttribute
-    public MultipartFile getFile(){
+    public ByteBuffer getFile(){
         return file;
     }
 
-    @DynamoDBAttribute
-    public MultipartFile getMetadata(){
+    public ByteBuffer getMetadata(){
         return metadata;
     }
 
-    @DynamoDBAttribute
-    public MultipartFile getAuthtext(){
+    public ByteBuffer getAuthtext(){
         return authtext;
     }
 
+    public Map<String, AttributeValue> getAttributeMap() {
+        return attributes;
+    }
 }
